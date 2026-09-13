@@ -105,9 +105,11 @@ export default function HomePage() {
             </div>
           </div>
 
-          <p className="min-w-0 flex-1 truncate text-[9px] font-medium text-slate-400">
-            사장님의 오늘도, 안전한 배달
-          </p>
+          <div className="min-w-0 flex-1">
+            <p className="hidden truncate text-[9px] font-medium text-slate-400 min-[415px]:block">
+              사장님의 오늘도, 안전한 배달
+            </p>
+          </div>
 
           <div className="flex shrink-0 items-center gap-1 rounded-full border border-emerald-400/35 bg-emerald-500/10 px-1.5 py-[4px]">
             <span className="live-dot h-[6px] w-[6px] rounded-full bg-emerald-400" />
@@ -156,7 +158,7 @@ export default function HomePage() {
             <div aria-hidden className="absolute top-0 right-0 flex items-start gap-1">
               <div className="relative">
                 <Shield
-                  className="h-[74px] w-[74px] text-sky-400/65 drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]"
+                  className="h-[70px] w-[70px] text-sky-400/65 drop-shadow-[0_0_18px_rgba(56,189,248,0.5)]"
                   strokeWidth={1.15}
                 />
                 <ShieldCheck
@@ -283,10 +285,9 @@ export default function HomePage() {
               <span className="shrink-0 self-start rounded bg-slate-700/70 px-1.5 py-[3px] text-[9px] font-medium text-slate-300">
                 방금 전
               </span>
-              <p className="flex-1 text-[11.5px] leading-[1.5] text-slate-200">
-                <b className="font-bold text-white">역삼동 치킨집</b>에서 재사용한 치킨 뼈 사진
-                <br />
-                (3년 전 네이버 블로그 도용)이 적발되었습니다.
+              <p className="flex-1 text-[11px] leading-[1.5] tracking-[-0.01em] text-slate-200">
+                <b className="font-bold text-white">역삼동 치킨집</b>에서 재사용한 치킨 뼈 사진 (3년
+                전 네이버 블로그 도용)이 적발되었습니다.
               </p>
               <div className="flex shrink-0 items-center gap-1.5 rounded-xl border border-white/10 bg-[#0E1626] px-2 py-1.5">
                 <Users className="h-4 w-4 text-sky-200" strokeWidth={1.8} />
