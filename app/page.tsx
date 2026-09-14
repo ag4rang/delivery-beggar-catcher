@@ -31,13 +31,21 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import { saveImageRecord } from "@/lib/images";
 
 type NavKey = "home" | "cases" | "match" | "store";
 
 type ExifResult = {
+  /** 화면 표시용 촬영 일시 */
   shotAt: string | null;
+  /** 화면 표시용 기종(Make + Model) */
   model: string | null;
   software: string | null;
+  /** 저장용 원본 값 */
+  takenAt: string | null;
+  cameraMake: string | null;
+  cameraModel: string | null;
+  tags: Record<string, unknown> | null;
 };
 
 type AnalysisState =
@@ -45,7 +53,17 @@ type AnalysisState =
   | { status: "reading" }
   | { status: "done"; exif: ExifResult };
 
-const EMPTY_EXIF: ExifResult = { shotAt: null, model: null, software: null };
+type SaveState = "idle" | "saving" | "saved" | "error";
+
+const EMPTY_EXIF: ExifResult = {
+  shotAt: null,
+  model: null,
+  software: null,
+  takenAt: null,
+  cameraMake: null,
+  cameraModel: null,
+  tags: null,
+};
 
 const NAV_ITEMS: { key: NavKey; label: string; icon: typeof Home }[] = [
   { key: "home", label: "홈", icon: Home },
@@ -60,7 +78,11 @@ const MENU_ITEMS = ["내 매장 보호 현황", "블랙리스트 피드", "이�
 type ExifReader = {
   getData: (file: File, callback: (this: unknown) => void) => boolean;
   getTag: (file: unknown, tag: string) => unknown;
+  getAllTags: (file: unknown) => unknown;
 };
+
+/** 용량이 크거나 jsonb로 옮길 실익이 없는 바이너리성 태그는 제외한다. */
+const SKIPPED_TAGS = new Set(["MakerNote", "UserComment", "thumbnail"]);
 
 async function loadExif(): Promise<ExifReader> {
   const mod = await import("exif-js");
@@ -87,6 +109,70 @@ function formatExifDate(value: unknown): string | null {
   return `${year}.${month}.${day} ${hour}:${minute}`;
 }
 
+/** EXIF 촬영 시각에는 타임존이 없어 사용자 로컬 시각으로 해석한 뒤 ISO로 변환한다. */
+function exifDateToIso(value: unknown): string | null {
+  const raw = toText(value);
+  if (!raw) return null;
+  const matched = raw.match(/^(\d{4}):(\d{2}):(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?/);
+  if (!matched) return null;
+  const [, year, month, day, hour, minute, second] = matched;
+  const date = new Date(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second ?? "0"),
+  );
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+/** exif-js는 분수값을 Number 래퍼로 돌려주므로 jsonb에 넣을 수 있는 값으로 변환한다. */
+function toJsonValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string") return value.replace(/\u0000/g, "").trim();
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "boolean") return value;
+  if (value instanceof Number) return value.valueOf();
+  if (depth >= 2) return null;
+  if (Array.isArray(value)) {
+    return value.slice(0, 16).map((item) => toJsonValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      const converted = toJsonValue(nested, depth + 1);
+      if (converted !== null) result[key] = converted;
+    }
+    return Object.keys(result).length > 0 ? result : null;
+  }
+  return null;
+}
+
+function sanitizeTags(tags: unknown): Record<string, unknown> | null {
+  if (!tags || typeof tags !== "object") return null;
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(tags as Record<string, unknown>)) {
+    if (SKIPPED_TAGS.has(key)) continue;
+    const converted = toJsonValue(value);
+    if (converted !== null && converted !== "") result[key] = converted;
+  }
+
+  return Object.keys(result).length > 0 ? result : null;
+}
+
+/** 미리보기용 object URL을 그대로 재사용해 원본 픽셀 크기를 읽는다. */
+function readImageSize(url: string): Promise<{ width: number | null; height: number | null }> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () =>
+      resolve({ width: image.naturalWidth || null, height: image.naturalHeight || null });
+    image.onerror = () => resolve({ width: null, height: null });
+    image.src = url;
+  });
+}
+
 async function extractExif(file: File): Promise<ExifResult> {
   let EXIF: ExifReader;
   try {
@@ -110,16 +196,21 @@ async function extractExif(file: File): Promise<ExifResult> {
     try {
       const started = EXIF.getData(file, function readTags(this: unknown) {
         try {
+          const rawShotAt =
+            EXIF.getTag(this, "DateTimeOriginal") ??
+            EXIF.getTag(this, "DateTimeDigitized") ??
+            EXIF.getTag(this, "DateTime");
+          const cameraMake = toText(EXIF.getTag(this, "Make"));
+          const cameraModel = toText(EXIF.getTag(this, "Model"));
+
           finish({
-            shotAt:
-              formatExifDate(EXIF.getTag(this, "DateTimeOriginal")) ??
-              formatExifDate(EXIF.getTag(this, "DateTimeDigitized")) ??
-              formatExifDate(EXIF.getTag(this, "DateTime")),
-            model:
-              [toText(EXIF.getTag(this, "Make")), toText(EXIF.getTag(this, "Model"))]
-                .filter(Boolean)
-                .join(" ") || null,
+            shotAt: formatExifDate(rawShotAt),
+            model: [cameraMake, cameraModel].filter(Boolean).join(" ") || null,
             software: toText(EXIF.getTag(this, "Software")),
+            takenAt: exifDateToIso(rawShotAt),
+            cameraMake,
+            cameraModel,
+            tags: sanitizeTags(EXIF.getAllTags(this)),
           });
         } catch {
           finish(EMPTY_EXIF);
@@ -142,6 +233,7 @@ export default function HomePage() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisState>({ status: "idle" });
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   const [activeNav, setActiveNav] = useState<NavKey>("home");
 
   const assignFile = useCallback((file: File | undefined) => {
@@ -153,15 +245,43 @@ export default function HomePage() {
     setPreviewUrl(url);
     setFileName(file.name);
     setAnalysis({ status: "reading" });
+    setSaveState("idle");
 
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
 
-    void extractExif(file).then((exif) => {
+    void (async () => {
+      const [exif, size] = await Promise.all([extractExif(file), readImageSize(url)]);
+
       // 더 최근 선택이 있으면 이전 결과는 버린다.
       if (requestIdRef.current !== requestId) return;
       setAnalysis({ status: "done", exif });
-    });
+      setSaveState("saving");
+
+      const result = await saveImageRecord({
+        source_type: "user_report",
+        original_filename: file.name || null,
+        file_size: file.size,
+        mime_type: file.type || null,
+        width: size.width,
+        height: size.height,
+        exif_available: Boolean(
+          exif.takenAt || exif.cameraMake || exif.cameraModel || exif.software || exif.tags,
+        ),
+        taken_at: exif.takenAt,
+        camera_make: exif.cameraMake,
+        camera_model: exif.cameraModel,
+        software: exif.software,
+        exif_data: exif.tags,
+        phash: null,
+        storage_key: null,
+        source_url: null,
+        first_seen_at: new Date().toISOString(),
+      });
+
+      if (requestIdRef.current !== requestId) return;
+      setSaveState(result.ok ? "saved" : "error");
+    })();
   }, []);
 
   useEffect(() => {
@@ -383,6 +503,16 @@ export default function HomePage() {
                   <b className="font-semibold text-white">{exif.software}</b>
                 </p>
               </div>
+            ) : null}
+
+            {saveState !== "idle" ? (
+              <p className="mt-2 text-center text-[9px] text-slate-500">
+                {saveState === "saving"
+                  ? "분석 기록 저장 중"
+                  : saveState === "saved"
+                    ? "분석 기록 저장됨"
+                    : "분석 기록은 저장되지 않았습니다"}
+              </p>
             ) : null}
           </div>
 
