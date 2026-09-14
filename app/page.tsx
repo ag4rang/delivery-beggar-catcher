@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  AlertTriangle,
   Camera,
   ChevronRight,
   Database,
@@ -19,9 +18,9 @@ import {
   FolderClosed,
   Home,
   Images,
+  Info,
   Loader2,
   Menu,
-  PencilLine,
   Radio,
   Search,
   Shield,
@@ -184,9 +183,10 @@ export default function HomePage() {
   }
 
   const exif = analysis.status === "done" ? analysis.exif : null;
+  const idle = analysis.status === "idle";
   const reading = analysis.status === "reading";
   const hasMetadata = Boolean(exif && (exif.shotAt || exif.model));
-  const metadataStripped = analysis.status === "done" && !hasMetadata;
+  const metadataUnknown = analysis.status === "done" && !hasMetadata;
 
   return (
     <div className="min-h-dvh bg-[#07090f]">
@@ -362,21 +362,25 @@ export default function HomePage() {
               </div>
             ) : null}
 
-            {metadataStripped ? (
-              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-400/40 bg-amber-500/10 px-3 py-2.5">
-                <AlertTriangle className="mt-[1px] h-4 w-4 shrink-0 text-amber-400" strokeWidth={2} />
-                <p className="text-[10.5px] leading-[1.5] font-semibold text-amber-200">
-                  메타데이터가 삭제된 사진입니다. 2·3단계 시각 지문으로 정밀 추적합니다
+            {metadataUnknown ? (
+              <div className="mt-2.5 flex items-start gap-2 rounded-xl border border-amber-400/35 bg-amber-500/[0.08] px-3 py-2.5">
+                <Info className="mt-[1px] h-4 w-4 shrink-0 text-amber-300" strokeWidth={2} />
+                <p className="text-[10.5px] leading-[1.55] font-medium text-amber-100/90">
+                  메타데이터를 확인할 수 없습니다.
+                  <br />
+                  카카오톡 전송, 캡처, 이미지 압축 과정에서 EXIF가 제거될 수 있습니다.
+                  <br />
+                  2·3단계 이미지 유사성 분석을 계속합니다.
                 </p>
               </div>
             ) : null}
 
             {exif?.software ? (
-              <div className="mt-2 flex items-start gap-2 rounded-xl border border-rose-400/35 bg-rose-500/10 px-3 py-2.5">
-                <PencilLine className="mt-[1px] h-4 w-4 shrink-0 text-rose-300" strokeWidth={2} />
-                <p className="text-[10.5px] leading-[1.5] font-medium text-rose-200">
-                  편집 소프트웨어 흔적 감지:{" "}
-                  <b className="font-bold text-rose-100">{exif.software}</b>
+              <div className="mt-2 flex items-start gap-2 rounded-xl border border-white/10 bg-[#111A28] px-3 py-2.5">
+                <Info className="mt-[1px] h-4 w-4 shrink-0 text-slate-400" strokeWidth={2} />
+                <p className="text-[10.5px] leading-[1.5] font-medium text-slate-300">
+                  Software 태그 확인:{" "}
+                  <b className="font-semibold text-white">{exif.software}</b>
                 </p>
               </div>
             ) : null}
@@ -388,13 +392,13 @@ export default function HomePage() {
           >
             <PipelineCard
               step={1}
-              state={reading ? "active" : metadataStripped ? "alert" : "done"}
-              status={reading ? "분석 중" : metadataStripped ? "검출 실패" : "완료"}
+              state={idle ? "waiting" : reading ? "active" : metadataUnknown ? "info" : "done"}
+              status={
+                idle ? "대기중" : reading ? "분석 중" : metadataUnknown ? "정보 없음" : "완료"
+              }
               icon={
                 <FileText
-                  className={`h-[25px] w-[25px] ${
-                    metadataStripped ? "text-amber-200" : "text-slate-100"
-                  }`}
+                  className={`h-[25px] w-[25px] ${idle ? "text-slate-300" : "text-slate-100"}`}
                   strokeWidth={1.5}
                 />
               }
@@ -402,8 +406,8 @@ export default function HomePage() {
               lines={
                 hasMetadata
                   ? undefined
-                  : metadataStripped
-                    ? ["촬영 메타데이터", "없음 (압축·캡처본)"]
+                  : metadataUnknown
+                    ? ["촬영 일시·기종", "확인 불가"]
                     : ["원본 촬영 일시·기종", "메타데이터 분석", "(무료)"]
               }
               body={
@@ -424,9 +428,9 @@ export default function HomePage() {
             <StepArrow />
             <PipelineCard
               step={2}
-              state={reading ? "waiting" : "active"}
-              status={reading ? "대기중" : "분석 중"}
-              icon={<Database className="h-[25px] w-[25px] text-sky-200" strokeWidth={1.5} />}
+              state="waiting"
+              status="대기중"
+              icon={<Database className="h-[25px] w-[25px] text-slate-300" strokeWidth={1.5} />}
               title="2단계"
               lines={["전국 매장 14만 건", "사기 사진 지문(pHash)", "대조"]}
             />
@@ -533,7 +537,7 @@ function PipelineCard({
   body,
 }: {
   step: number;
-  state: "done" | "active" | "waiting" | "alert";
+  state: "done" | "active" | "waiting" | "info";
   status: string;
   icon: ReactNode;
   title: string;
@@ -542,18 +546,16 @@ function PipelineCard({
 }) {
   const active = state === "active";
   const waiting = state === "waiting";
-  const alert = state === "alert";
+  const info = state === "info";
 
   return (
     <article
       className={`relative h-full overflow-hidden rounded-2xl border px-1.5 pt-2.5 pb-2.5 ${
         active
           ? "analyze-card border-sky-400/55 bg-[#0F2033]"
-          : alert
-            ? "border-amber-400/45 bg-[#221A0E]"
-            : waiting
-              ? "border-white/[0.08] bg-[#0E131C]"
-              : "border-white/10 bg-[#111A28]"
+          : waiting
+            ? "border-white/[0.08] bg-[#0E131C]"
+            : "border-white/10 bg-[#111A28]"
       }`}
     >
       {active ? (
@@ -566,11 +568,7 @@ function PipelineCard({
       <div className="mb-2 flex items-center justify-between gap-0.5 px-0.5">
         <span
           className={`flex h-[17px] w-[17px] items-center justify-center rounded-full text-[9.5px] font-bold ${
-            alert
-              ? "bg-amber-500 text-[#1B1206]"
-              : waiting
-                ? "bg-slate-600 text-slate-100"
-                : "bg-[#2563eb] text-white"
+            waiting ? "bg-slate-600 text-slate-100" : "bg-[#2563eb] text-white"
           }`}
         >
           {step}
@@ -579,8 +577,8 @@ function PipelineCard({
           className={`flex items-center text-[9px] font-semibold ${
             active
               ? "text-sky-300"
-              : alert
-                ? "text-amber-300"
+              : info
+                ? "text-amber-200"
                 : waiting
                   ? "text-slate-400"
                   : "text-slate-200"
@@ -598,18 +596,14 @@ function PipelineCard({
 
       <div className="mb-1.5 flex justify-center">{icon}</div>
 
-      <p
-        className={`text-center text-[12px] font-bold ${
-          active ? "text-sky-300" : alert ? "text-amber-200" : "text-white"
-        }`}
-      >
+      <p className={`text-center text-[12px] font-bold ${active ? "text-sky-300" : "text-white"}`}>
         {title}
       </p>
 
       {body ?? (
         <div
           className={`mt-1 text-center text-[9px] leading-[1.45] ${
-            alert ? "text-amber-200/80" : "text-slate-400"
+            info ? "text-amber-100/70" : "text-slate-400"
           }`}
         >
           {lines?.map((line) => <p key={line}>{line}</p>)}
